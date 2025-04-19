@@ -1,0 +1,95 @@
+import numpy as np
+import random
+import time
+
+# Matriz de custos do problema (empresa x projeto)
+cost_matrix = np.array([
+    [12, 18, 15, 22, 9, 14, 20, 11, 17],
+    [19, 8, 13, 25, 16, 10, 7, 21, 24],
+    [6, 14, 27, 10, 12, 19, 23, 16, 8],
+    [17, 11, 20, 9, 18, 13, 25, 14, 22],
+    [10, 23, 16, 14, 7, 21, 12, 19, 15],
+    [13, 25, 9, 17, 11, 8, 16, 22, 20],
+    [21, 16, 24, 12, 20, 15, 9, 18, 10],
+    [8, 19, 11, 16, 22, 17, 14, 10, 13],
+    [15, 10, 18, 21, 13, 12, 22, 9, 16]
+])
+
+# Número de empresas e projetos
+n = 9
+
+# Função objetivo: soma dos custos
+def objective_function(X):
+    return np.sum(X * cost_matrix)
+
+# Geração de uma solução inicial válida
+def generate_initial_solution():
+    X = np.zeros((n, n), dtype=int)
+    for j in range(n):
+        i = random.randint(0, n-1)
+        X[i, j] = 1
+    return X
+
+# Função de vizinhança: troca de dois projetos entre empresas
+def get_neighbors(X):
+    neighbors = []
+    for i in range(n):
+        for j in range(i+1, n):
+            X_new = X.copy()
+            for col in range(n):
+                if X[i, col] == 1:
+                    X_new[i, col], X_new[j, col] = X_new[j, col], X_new[i, col]
+            neighbors.append(X_new)
+    return neighbors
+
+# Algoritmo de Hill Climbing
+def hill_climbing():
+    # Gerar uma solução inicial
+    X = generate_initial_solution()
+    best_value = objective_function(X)
+    no_improvement_count = 0
+    max_no_improvement = 100  # número de iterações sem melhoria
+
+    while no_improvement_count < max_no_improvement:
+        neighbors = get_neighbors(X)
+        best_neighbor = None
+        best_neighbor_value = float('inf')
+
+        # Avaliar vizinhos e escolher o melhor
+        for neighbor in neighbors:
+            value = objective_function(neighbor)
+            if value < best_neighbor_value:
+                best_neighbor = neighbor
+                best_neighbor_value = value
+
+        # Se o vizinho é melhor, atualize a solução
+        if best_neighbor_value < best_value:
+            X = best_neighbor
+            best_value = best_neighbor_value
+            no_improvement_count = 0  # resetar o contador
+        else:
+            no_improvement_count += 1
+
+    return X, best_value
+
+# Função principal
+def main():
+    start_time = time.time()
+    
+    # Executar Hill Climbing
+    solution, value = hill_climbing()
+    
+    # Tempo de execução
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    return solution, value, execution_time
+
+# Chamar a função principal
+solution, value, execution_time = main()
+
+# Exibir resultados
+print("Solução Encontrada:")
+print(solution)
+print(f"Valor da Função Objetivo: {value}")
+print(f"Tempo de Execução: {execution_time:.4f} segundos")
