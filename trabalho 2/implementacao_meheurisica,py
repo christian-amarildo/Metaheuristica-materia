@@ -1,9 +1,15 @@
-import numpy as np
 import random
 import time
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import seaborn as sns
 
-# Matriz de custos do problema (empresa x projeto)
-cost_matrix = np.array([
+# Definir estilo global para visualização
+plt.style.use('classic')
+
+# Matriz de custos (empresas x projetos)
+matrix_valores = np.array([
     [12, 18, 15, 22, 9, 14, 20, 11, 17],
     [19, 8, 13, 25, 16, 10, 7, 21, 24],
     [6, 14, 27, 10, 12, 19, 23, 16, 8],
@@ -15,81 +21,283 @@ cost_matrix = np.array([
     [15, 10, 18, 21, 13, 12, 22, 9, 16]
 ])
 
-# Número de empresas e projetos
-n = 9
-
-# Função objetivo: soma dos custos
-def objective_function(X):
-    return np.sum(X * cost_matrix)
-
-# Geração de uma solução inicial válida
-def generate_initial_solution():
-    X = np.zeros((n, n), dtype=int)
-    for j in range(n):
-        i = random.randint(0, n-1)
-        X[i, j] = 1
-    return X
-
-# Função de vizinhança: troca de dois projetos entre empresas
-def get_neighbors(X):
-    neighbors = []
-    for i in range(n):
-        for j in range(i+1, n):
-            X_new = X.copy()
-            for col in range(n):
-                if X[i, col] == 1:
-                    X_new[i, col], X_new[j, col] = X_new[j, col], X_new[i, col]
-            neighbors.append(X_new)
-    return neighbors
-
-# Algoritmo de Hill Climbing
-def hill_climbing():
-    # Gerar uma solução inicial
-    X = generate_initial_solution()
-    best_value = objective_function(X)
-    no_improvement_count = 0
-    max_no_improvement = 100  # número de iterações sem melhoria
-
-    while no_improvement_count < max_no_improvement:
-        neighbors = get_neighbors(X)
-        best_neighbor = None
-        best_neighbor_value = float('inf')
-
-        # Avaliar vizinhos e escolher o melhor
-        for neighbor in neighbors:
-            value = objective_function(neighbor)
-            if value < best_neighbor_value:
-                best_neighbor = neighbor
-                best_neighbor_value = value
-
-        # Se o vizinho é melhor, atualize a solução
-        if best_neighbor_value < best_value:
-            X = best_neighbor
-            best_value = best_neighbor_value
-            no_improvement_count = 0  # resetar o contador
-        else:
-            no_improvement_count += 1
-
-    return X, best_value
-
-# Função principal
-def main():
-    start_time = time.time()
+class AlocadorProjetos:
+    def __init__(self, matriz_custos):
+        """
+        Inicializar o solver com a matriz de custos
+        
+        Args:
+            matriz_custos (np.array): Matriz de custos para cada alocação empresa-projeto
+        """
+        self.matriz_custos = matriz_custos
+        self.num_empresas = matriz_custos.shape[0]
+        self.num_projetos = matriz_custos.shape[1]
     
-    # Executar Hill Climbing
-    solution, value = hill_climbing()
+    def calcular_custo(self, solucao):
+        """
+        Calcular o custo total de uma solução
+        
+        Args:
+            solucao (list): Lista de atribuições de projetos para cada empresa
+        
+        Returns:
+            float: Custo total da solução
+        """
+        return sum(self.matriz_custos[empresa, projeto-1] 
+                   for empresa, projeto in enumerate(solucao))
     
-    # Tempo de execução
-    end_time = time.time()
-    execution_time = end_time - start_time
+    def gerar_vizinhos_melhores(self, solucao, custo_atual):
+        """
+        Gerar soluções vizinhas com potencialmente menores custos
+        
+        Args:
+            solucao (list): Solução atual
+            custo_atual (float): Custo da solução atual
+        
+        Returns:
+            list: Lista de soluções vizinhas melhoradas com seus custos
+        """
+        vizinhos = []
+        for i in range(self.num_empresas):
+            for j in range(i + 1, self.num_empresas):
+                # Criar uma cópia da solução
+                vizinho = solucao.copy()
+                
+                # Trocar projetos
+                vizinho[i], vizinho[j] = vizinho[j], vizinho[i]
+                
+                # Calcular novo custo
+                novo_custo = self.calcular_custo(vizinho)
+                
+                # Manter apenas se o custo for melhorado
+                if novo_custo < custo_atual:
+                    vizinhos.append((vizinho, novo_custo))
+        
+        return vizinhos
+    
+    def hill_climbing(self, max_iteracoes=1000):
+        """
+        Realizar otimização Hill Climbing
+        
+        Args:
+            max_iteracoes (int): Número máximo de iterações
+        
+        Returns:
+            tuple: Melhor solução, melhor custo e histórico de custos
+        """
+        # Gerar solução inicial aleatória
+        solucao_atual = list(range(1, self.num_projetos + 1))
+        random.shuffle(solucao_atual)
+        custo_atual = self.calcular_custo(solucao_atual)
+        
+        # Histórico de custos para rastreamento
+        historico_custo = [custo_atual]
+        
+        iteracoes = 0
+        while iteracoes < max_iteracoes:
+            # Encontrar vizinhos melhorados
+            vizinhos = self.gerar_vizinhos_melhores(solucao_atual, custo_atual)
+            
+            # Se não houver vizinhos melhores, parar
+            if not vizinhos:
+                break
+            
+            # Selecionar o melhor vizinho
+            solucao_atual, custo_atual = min(vizinhos, key=lambda x: x[1])
+            historico_custo.append(custo_atual)
+            
+            iteracoes += 1
+        
+        return solucao_atual, custo_atual, historico_custo
+    
+    def multi_start_hill_climbing(self, num_execucoes=1000):
+        """
+        Realizar múltiplas execuções de Hill Climbing
+        
+        Args:
+            num_execucoes (int): Número de execuções independentes
+        
+        Returns:
+            tuple: Melhor solução, melhor custo, custos finais e históricos de custos
+        """
+        melhor_solucao = None
+        melhor_custo = float('inf')
+        custos_finais = []
+        historicos_custo = []
+        
+        for _ in range(num_execucoes):
+            solucao, custo, historico = self.hill_climbing()
+            custos_finais.append(custo)
+            historicos_custo.append(historico)
+            
+            if custo < melhor_custo:
+                melhor_solucao = solucao
+                melhor_custo = custo
+        
+        return melhor_solucao, melhor_custo, custos_finais, historicos_custo
+    
+# Função adicional para exibir matriz binária de alocações
 
-    return solution, value, execution_time
+def exibir_matriz_alocacoes(matriz):
+    print("Matriz de Alocações:")
+    cabecalho = "Emp\\Proj | " + " | ".join([f"P{i+1}" for i in range(matriz.shape[1])]) + " |"
+    print(cabecalho)
+    print("-" * len(cabecalho))
+    for i, linha in enumerate(matriz):
+        linha_formatada = " | ".join(str(val) for val in linha)
+        print(f"E{i+1:<7}| {linha_formatada} |")
 
-# Chamar a função principal
-solution, value, execution_time = main()
+def criar_mapa_calor_alocacao(solucao, matriz_custos):
+    """
+    Criar mapa de calor de alocação com custos
+    
+    Args:
+        solucao (list): Solução de alocação de projetos
+        matriz_custos (np.array): Matriz de custos original
+    """
+    # Criar matriz de alocação
+    matriz_alocacao = np.zeros_like(matriz_custos, dtype=float)
+    
+    # Preencher matriz com custos da solução ótima
+    for empresa, projeto in enumerate(solucao):
+        matriz_alocacao[empresa, projeto-1] = matriz_custos[empresa, projeto-1]
+    
+    # Configurar figura
+    plt.figure(figsize=(12, 8))
+    
+    # Criar máscara para destacar projetos alocados
+    mascara = np.ones_like(matriz_alocacao, dtype=bool)
+    for empresa, projeto in enumerate(solucao):
+        mascara[empresa, projeto-1] = False
+    
+    # Criar heatmap
+    sns.heatmap(matriz_custos, 
+                mask=mascara,
+                annot=True, 
+                cmap='YlGnBu', 
+                fmt='.0f', 
+                cbar_kws={'label': 'Custo'})
+    
+    # Personalizar eixos
+    plt.title('Mapa de Calor de Custos - Solução Ótima', fontsize=15)
+    plt.xlabel('Projetos', fontsize=12)
+    plt.ylabel('Empresas', fontsize=12)
+    plt.xticks(np.arange(9) + 0.5, [f'P{i+1}' for i in range(9)])
+    plt.yticks(np.arange(9) + 0.5, [f'E{i+1}' for i in range(9)])
+    
+    plt.tight_layout()
+    plt.show()
 
-# Exibir resultados
-print("Solução Encontrada:")
-print(solution)
-print(f"Valor da Função Objetivo: {value}")
-print(f"Tempo de Execução: {execution_time:.4f} segundos")
+
+def plotar_analise_convergencia(historicos, custos_finais, melhor_custo, solucao, matriz_custos):
+    """
+    Criar visualização abrangente do processo de otimização
+    
+    Args:
+        historicos (list): Históricos de custos de várias execuções
+        custos_finais (list): Custos finais de cada execução
+        melhor_custo (float): Melhor custo geral encontrado
+        solucao (list): Melhor solução encontrada
+        matriz_custos (np.array): Matriz de custos original
+    """
+    plt.figure(figsize=(16, 10))
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+    
+    # Mapa de cores para coloração consistente
+    colormap = plt.cm.plasma
+    
+    # Subplot 1: Trajetórias de Convergência
+    plt.subplot(2, 2, 1)
+    for i, hist in enumerate(historicos[:30]):
+        plt.plot(hist, alpha=0.7, linewidth=1.5, 
+                 label=f'Execução {i+1}', 
+                 color=colormap(i/30))
+    plt.title('Trajetórias de Convergência\n(Primeiras 30 Execuções)', fontsize=10)
+    plt.xlabel('Iterações', fontsize=8)
+    plt.ylabel('Custo Total', fontsize=8)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend(loc='best', fontsize=6)
+    
+    # Subplot 2: Melhor Caminho de Convergência
+    plt.subplot(2, 2, 2)
+    melhor_indice = custos_finais.index(min(custos_finais))
+    melhor_historico = historicos[melhor_indice]
+    plt.plot(melhor_historico, color='red', linewidth=2)
+    plt.title(f'Melhor Caminho de Convergência\n(Custo: {min(custos_finais)})', fontsize=10)
+    plt.xlabel('Iterações', fontsize=8)
+    plt.ylabel('Custo Total', fontsize=8)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Subplot 3: Distribuição de Custos Finais
+    plt.subplot(2, 2, 3)
+    plt.hist(custos_finais, bins=20, color='skyblue', edgecolor='black')
+    plt.axvline(melhor_custo, color='red', linestyle='--', 
+                label=f'Melhor Custo: {melhor_custo}')
+    plt.title('Distribuição de Custos Finais', fontsize=10)
+    plt.xlabel('Custo Total', fontsize=8)
+    plt.ylabel('Frequência', fontsize=8)
+    plt.legend(fontsize=8)
+        
+    # Subplot 4: Mapa de Calor Completo
+    plt.subplot(2, 2, 4)
+
+    # Criar máscara para destacar projetos alocados
+    mascara = np.zeros_like(matriz_custos, dtype=bool)
+    for empresa, projeto in enumerate(solucao):
+        # Destacar alocação ótima de forma diferente
+        mascara[empresa, :] = False
+
+    # Criar heatmap
+    sns.heatmap(matriz_custos, 
+                mask=mascara,
+                annot=True, 
+                cmap='coolwarm', 
+                fmt='.0f', 
+                cbar_kws={'label': 'Custo'},
+                center=matriz_custos.mean())
+
+    plt.title('Comparação de Custos entre Projetos', fontsize=10)
+    plt.xlabel('Projetos', fontsize=8)
+    plt.ylabel('Empresas', fontsize=8)
+    plt.xticks(np.arange(9) + 0.5, [f'P{i+1}' for i in range(9)])
+    plt.yticks(np.arange(9) + 0.5, [f'E{i+1}' for i in range(9)])
+    plt.show()
+            
+def principal():
+    # Definir semente aleatória para reprodutibilidade
+    random.seed(42)
+    np.random.seed(42)
+    
+    # Inicializar solver
+    alocador = AlocadorProjetos(matrix_valores)
+    
+    # Medir tempo de execução
+    tempo_inicio = time.time()
+    
+    # Executar hill climbing multi-start
+    melhor_solucao, melhor_custo, custos_finais, historicos = alocador.multi_start_hill_climbing()
+    
+    tempo_execucao = time.time() - tempo_inicio
+    
+    # Construir matriz binária de alocações para exibição
+    matriz_aloc = np.zeros_like(matrix_valores, dtype=int)
+    for i, proj in enumerate(melhor_solucao):
+        matriz_aloc[i, proj-1] = 1
+    
+    # Exibir tabela de alocações
+    exibir_matriz_alocacoes(matriz_aloc)
+
+   
+    # Exibir resultados
+    print("\nMelhor Solução Encontrada:")
+    for empresa, projeto in enumerate(melhor_solucao, 1):
+        print(f"Empresa E{empresa} → Projeto P{projeto} (Custo: {matrix_valores[empresa-1, projeto-1]})")
+    
+    print(f"\nCusto Total: {melhor_custo}")
+    print(f"Tempo de Execução: {tempo_execucao:.4f} segundos")
+    
+    # Visualizações
+    plotar_analise_convergencia(historicos, custos_finais, melhor_custo, melhor_solucao, matrix_valores)
+
+if __name__ == "__main__":
+    principal()
